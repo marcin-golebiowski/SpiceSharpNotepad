@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>SpiceSharpNotepad</title>
+    <base href="/" />
+    <link href="css/bootstrap/bootstrap.min.css" rel="stylesheet" />
+    <link href="css/app.css" rel="stylesheet" />
+    <link href="SpiceSharpNotepad.styles.css" rel="stylesheet" />
+</head>
+
+<body>
+    <div id="app">Loading...</div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">🗙</a>
+    </div>
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+
+        function destroyCharts() {
+
+            if (window.dynamicCharts != null) {
+                for (var chart in window.dynamicCharts) {
+                    window.dynamicCharts[chart].destroy();
+                }
+            }
+        }
+
+        function createChart(chartId, newData) {
+            const labels = [];
+            const values = [];
+
+            newData = JSON.parse(newData);
+            for (var i = 0; i < newData.Points.length; i++) {
+                labels.push(newData.Points[i].X);
+                values.push(newData.Points[i].Y);
+            }
+
+            const data = {
+                labels: labels,
+                datasets: [{
+                    label: newData.Name,
+                    backgroundColor: 'black',
+                    borderColor: '#' + (Math.random() * 0xFFFFFF << 0).toString(16),
+                    data: values,
+                }]
+            };
+
+            const config = {
+                type: 'line',
+                data: data,
+                options: {
+                    responsive: true
+                }
+            };
+
+            if (window.dynamicCharts == null) {
+                window.dynamicCharts = {};
+            }
+
+            var canvas = document.createElement('canvas');
+            canvas.id = "canvas" + chartId;
+            canvas.width = 400;
+            canvas.height = 300;
+            var container = document.getElementById("charts");
+            container.appendChild(canvas);
+
+            window.dynamicCharts[chartId] = new Chart(
+                document.getElementById("canvas" + chartId),
+                config
+            );
+        };
+    </script>
+</body>
+</html>
