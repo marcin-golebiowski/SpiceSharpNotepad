@@ -17,14 +17,18 @@
 
 <h1>SpiceSharp simulation</h1>
 
-
-
 <div>
+<h2>Netlist:</h2>
 <textarea id="Raw" @bind="RawText" @ref="RawRef" cols="150" rows="15">
 </textarea>
 </div>
 <div>
 <button class="btn btn-primary" @onclick="Simulate">Simulate</button>
+</div>
+<div>
+<h2>Logs:</h2>
+<textarea id="Logs" @bind="LogsText" @ref="LogsRef" cols="150" rows="3">
+</textarea>
 </div>
 <div>
 Execution time: <input type="ExecutionTime" @bind="ExectionTime" /> seconds
@@ -38,7 +42,16 @@ Execution time: <input type="ExecutionTime" @bind="ExectionTime" /> seconds
 @code {
     string RawText = "";
     ElementReference RawRef;
+    string LogsText = "";
+    ElementReference LogsRef;
     string ExectionTime = "";
+
+    public class SimulationResult
+    {
+        public Exception Exception { get; set; }
+        public List<XyPlot> Plots { get; set; }
+        public bool IsSuccessful { get; set; } = true;
+    }
 
     public class SimulationTask
     {
@@ -54,7 +67,7 @@ Execution time: <input type="ExecutionTime" @bind="ExectionTime" /> seconds
             MessageService = messageService;
         }
 
-        public async Task<List<XyPlot>> Simulate(string rawText)
+        public async Task<SimulationResult> Simulate(string rawText)
         {
             try
             {
@@ -62,32 +75,66 @@ Execution time: <input type="ExecutionTime" @bind="ExectionTime" /> seconds
 
                 var parser = new SpiceNetlistParser();
                 var parseResult = parser.ParseNetlist(rawText);
+
+                if (parseResult.ValidationResult.HasError)
+                {
+                    
+                    return
+                        new SimulationResult
+                        {
+                            Plots = null,
+                            Exception = new Exception("Parse errors: " + string.Join("\r\n", parseResult.ValidationResult.Errors.Select(e => e.Message + ":" + e.Exception.ToString()))),
+                            IsSuccessful = false
+                        };
+                }
+
                 var netlist = parseResult.FinalModel;
 
                 // Translating netlist model to SpiceSharp
                 var reader = new SpiceSharpReader();
                 var spiceSharpModel = reader.Read(netlist);
 
+
+                if (!spiceSharpModel.Simulations.Any())
+                {
+                    return
+                        new SimulationResult
+                        {
+                            Plots = null,
+                            Exception = new Exception("No simulations found"),
+                            IsSuccessful = false
+                        };
+                }
+
                 // Simulation using SpiceSharp
-                var simulation = spiceSharpModel.Simulations.Single();
+                var simulation = spiceSharpModel.Simulations.First();
                 simulation.Run(spiceSharpModel.Circuit);
 
                 // Return plots
-                return spiceSharpModel.XyPlots;
+                return
+                     new SimulationResult
+                     {
+                         Plots = spiceSharpModel.XyPlots,
+                         Exception = null,
+                         IsSuccessful = true
+                     };
             }
             catch (Exception ex)
             {
-                return null;
+                return
+                 new SimulationResult
+                     {
+                         Plots = null,
+                         Exception = ex,
+                         IsSuccessful = false
+                     };
             }
         }
     }
 
     private async Task Simulate()
     {
-        // Create worker.
         var worker = await workerFactory.CreateAsync();
-        worker.IncomingMessage += this.OnWorkerMessage;
-
         var service = await worker.CreateBackgroundServiceAsync<SimulationTask>(options =>
                     options
                     .AddAssemblies("Microsoft.AspNetCore.Components.dll", "Microsoft.AspNetCore.Components")
@@ -105,47 +152,42 @@ Execution time: <input type="ExecutionTime" @bind="ExectionTime" /> seconds
                     .AddHttpClient());
 
 
-        await worker.PostMessageAsync("BaseUrl:" + Navigator.BaseUri);
-
         var netList = RawText;
 
         Stopwatch watch = new Stopwatch();
         watch.Start();
-        var plots = await service.RunAsync(s => s.Simulate(netList));
+        var result = await service.RunAsync(s => s.Simulate(netList));
+        watch.Stop();
 
-        if (plots == null)
+        if (result == null)
         {
-            await JSRuntime.InvokeVoidAsync("alert", "Error ocurred");
+            await JSRuntime.InvokeVoidAsync("alert", "Critical error ocurred");
             return;
         }
-
-        await JSRuntime.InvokeVoidAsync("destroyCharts");
-
-        var i = 0;
-        foreach (var plot in plots)
+        else
         {
-            var series = plot.Series;
-            foreach (var serie in series)
+            if (result.IsSuccessful)
             {
-                i++;
-                await JSRuntime.InvokeVoidAsync("createChart", i, JsonConvert.SerializeObject(serie));
+                await JSRuntime.InvokeVoidAsync("destroyCharts");
+
+                var i = 0;
+                foreach (var plot in result.Plots)
+                {
+                    var series = plot.Series;
+                    foreach (var serie in series)
+                    {
+                        i++;
+                        await JSRuntime.InvokeVoidAsync("createChart", i, JsonConvert.SerializeObject(serie));
+                    }
+                }
+
+                LogsText = "Success";
+                ExectionTime = watch.Elapsed.TotalSeconds.ToString();
+            }
+            else
+            {
+                LogsText = result.Exception.ToString();
             }
         }
-
-        watch.Stop();
-        ExectionTime = watch.Elapsed.TotalSeconds.ToString();
-    }
-
-
-    public void OnWorkerMessage(object sender, string message)
-    {
-        if (message.StartsWith($"Data:"))
-        {
-            StateHasChanged();
-        }
-    }
-
-    private void Update(string data)
-    {
     }
 }
